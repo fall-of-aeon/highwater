@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR branch makes the in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint · types · tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12 is the floor declared in pyproject, and what mypy is configured to
+      # analyse for. Testing the oldest supported version is the point.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          # Pinned deliberately. The dev extra floors these at ruff>=0.5 and
+          # mypy>=1.10, so an unpinned CI would pick up whatever released that
+          # morning and could fail a pull request that changed nothing. Bump
+          # these on purpose, in their own commit.
+          pip install "ruff==0.16.8" "mypy==2.3.1"
+
+      - name: ruff
+        run: ruff check .
+
+      - name: mypy
+        run: mypy
+
+      # The history is being landed in reviewable slices, so early branches can
+      # legitimately predate the first test.
+      - name: pytest
+        run: |
+          if [ -d tests ]; then
+            pytest tests/ -q -m "not integration"
+          else
+            echo "No tests/ directory at this commit yet - skipping."
+          fi
